@@ -10,7 +10,10 @@ body {
   color: #ffffff;
   margin: 0;
   padding: 0;
-  overflow: hidden;
-  overscroll-behavior: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-x: none;
+  scrollbar-width: thin;
+  scrollbar-color: #262626 #000000;
   font-family: var(--font-archivo), sans-serif;
 }

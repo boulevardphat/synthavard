@@ -3,7 +3,7 @@ import { Archivo } from 'next/font/google';
 import './globals.css'; // Global styles
 
 const archivo = Archivo({
-  subsets: ['latin'],
+  subsets: ['latin', 'latin-ext', 'vietnamese'],
   weight: 'variable',
   axes: ['wdth'],
   display: 'swap',
@@ -11,16 +11,16 @@ const archivo = Archivo({
 });
 
 export const metadata: Metadata = {
-  title: 'Void Studio',
+  title: 'synthavard',
   description: 'Pitch black workspace with Archivo font',
   openGraph: {
-    title: 'Void Studio',
+    title: 'synthavard',
     description: 'Pitch black workspace with Archivo font',
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Void Studio',
+    title: 'synthavard',
     description: 'Pitch black workspace with Archivo font',
   },
 };

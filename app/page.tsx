@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import CoverFlow, { type AlbumItem } from '@/components/CoverFlow';
+import type { AlbumItem } from '@/components/CoverFlow';
+import SynthavardApp from '@/components/SynthavardApp';
+import { getAlbumTrackInfo } from '@/lib/spotify-track';
 
 function parseCsvRow(line: string): string[] {
   const fields: string[] = [];
@@ -33,14 +35,16 @@ function loadAlbumsFromCsv(): AlbumItem[] {
     'public',
     'assets',
     'aistudio',
-    'albums_97a60c60.csv'
+    'albums__1__e5a35dab.csv'
   );
   const raw = fs.readFileSync(csvPath, 'utf-8');
   const lines = raw.split(/\r?\n/).filter((line) => line.trim().length > 0);
 
   const albums: AlbumItem[] = [];
   for (let i = 1; i < lines.length; i++) {
-    const [title, artist, imageUrl] = parseCsvRow(lines[i]);
+    const [title, artist, imageUrl, spotifyUrl, commentary] = parseCsvRow(
+      lines[i]
+    );
     if (!title || !imageUrl) continue;
     const id = albums.length;
     albums.push({
@@ -49,13 +53,20 @@ function loadAlbumsFromCsv(): AlbumItem[] {
       title,
       artist: artist || '',
       imageUrl,
+      spotifyUrl: spotifyUrl || '',
+      commentary: commentary || '',
     });
   }
 
   return albums;
 }
 
-export default function Page() {
+export default async function Page() {
   const albums = loadAlbumsFromCsv();
-  return <CoverFlow albums={albums} />;
+  const initialTrack =
+    albums.length > 0 && albums[0].spotifyUrl
+      ? await getAlbumTrackInfo(albums[0].spotifyUrl)
+      : null;
+
+  return <SynthavardApp albums={albums} initialTrack={initialTrack} />;
 }

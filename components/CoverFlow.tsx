@@ -3,16 +3,22 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 
+import type { AlbumTrackInfo } from '@/lib/spotify-track';
+
 export interface AlbumItem {
   id: number;
   label: string;
   title: string;
   artist: string;
   imageUrl: string;
+  spotifyUrl: string;
+  commentary: string;
 }
 
 interface CoverFlowProps {
   albums: AlbumItem[];
+  initialTrack?: AlbumTrackInfo | null;
+  isReady?: boolean;
 }
 
 interface CoverFlowLayout {
@@ -299,11 +305,19 @@ function computeBackgroundStrip(
   return results;
 }
 
-export default function CoverFlow({ albums }: CoverFlowProps) {
+export default function CoverFlow({
+  albums,
+  initialTrack = null,
+  isReady = true,
+}: CoverFlowProps) {
   const totalCovers = albums.length;
   const containerRef = useRef<HTMLDivElement>(null);
   const measureTextRef = useRef<SVGTextElement>(null);
   const measureCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const hasInteractedRef = useRef(false);
+  const currentPlayingUrlRef = useRef<string | null>(null);
+  const isReadyRef = useRef(isReady);
 
   const itemRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const surfaceRefs = useRef<Map<number, HTMLDivElement>>(new Map());
@@ -316,15 +330,29 @@ export default function CoverFlow({ albums }: CoverFlowProps) {
   const [viewport, setViewport] = useState({ w: 1440, h: 900 });
   const [measureVersion, setMeasureVersion] = useState(0);
   const [failedImages, setFailedImages] = useState<Record<number, boolean>>({});
+  const [trackMap, setTrackMap] = useState<Record<string, AlbumTrackInfo>>(() =>
+    initialTrack && albums[0]?.spotifyUrl
+      ? { [albums[0].spotifyUrl]: initialTrack }
+      : {}
+  );
 
   const layoutRef = useRef<CoverFlowLayout>(DEFAULT_LAYOUT);
   const viewportRef = useRef({ w: 1440, h: 900 });
   const reducedMotionRef = useRef(false);
   const albumsRef = useRef<AlbumItem[]>(albums);
+  const trackMapRef = useRef(trackMap);
 
   useEffect(() => {
     albumsRef.current = albums;
   }, [albums]);
+
+  useEffect(() => {
+    trackMapRef.current = trackMap;
+  }, [trackMap]);
+
+  useEffect(() => {
+    isReadyRef.current = isReady;
+  }, [isReady]);
 
   const physicsRef = useRef({
     pos: 0,
@@ -632,8 +660,14 @@ export default function CoverFlow({ albums }: CoverFlowProps) {
     if (!el || totalCovers === 0) return;
     const maxIndex = totalCovers - 1;
 
+    const markInteracted = () => {
+      hasInteractedRef.current = true;
+    };
+
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
+      if (!isReadyRef.current) return;
+      markInteracted();
       const p = physicsRef.current;
       const now = performance.now();
 
@@ -686,25 +720,30 @@ export default function CoverFlow({ albums }: CoverFlowProps) {
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (!isReadyRef.current) return;
       const p = physicsRef.current;
       if (e.key === 'ArrowRight' || e.key === 'PageDown') {
         e.preventDefault();
+        markInteracted();
         const step = e.key === 'PageDown' ? 5 : 1;
         const base = p.mode === 'snap' ? p.snapTarget : Math.round(p.pos);
         p.snapTarget = clamp(base + step, 0, maxIndex);
         p.mode = 'snap';
       } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
         e.preventDefault();
+        markInteracted();
         const step = e.key === 'PageUp' ? 5 : 1;
         const base = p.mode === 'snap' ? p.snapTarget : Math.round(p.pos);
         p.snapTarget = clamp(base - step, 0, maxIndex);
         p.mode = 'snap';
       } else if (e.key === 'Home') {
         e.preventDefault();
+        markInteracted();
         p.snapTarget = 0;
         p.mode = 'snap';
       } else if (e.key === 'End') {
         e.preventDefault();
+        markInteracted();
         p.snapTarget = maxIndex;
         p.mode = 'snap';
       }
@@ -718,7 +757,106 @@ export default function CoverFlow({ albums }: CoverFlowProps) {
     };
   }, [totalCovers]);
 
+  useEffect(() => {
+    const list = albumsRef.current;
+    if (list.length === 0) return;
+
+    let cancelled = false;
+    const indicesToLoad = [centerIndex, centerIndex + 1, centerIndex - 1].filter(
+      (idx) => idx >= 0 && idx < list.length
+    );
+
+    const timer = window.setTimeout(() => {
+      indicesToLoad.forEach(async (idx) => {
+        const spotifyUrl = list[idx]?.spotifyUrl;
+        if (!spotifyUrl || trackMapRef.current[spotifyUrl]) return;
+
+        try {
+          const res = await fetch(
+            `/api/album-track?url=${encodeURIComponent(spotifyUrl)}`
+          );
+          if (!res.ok) return;
+          const data = (await res.json()) as {
+            trackTitle?: string | null;
+            previewUrl?: string | null;
+          };
+          if (cancelled || !data?.trackTitle) return;
+          const info: AlbumTrackInfo = {
+            trackTitle: data.trackTitle,
+            previewUrl: data.previewUrl ?? null,
+          };
+          setTrackMap((prev) =>
+            prev[spotifyUrl] ? prev : { ...prev, [spotifyUrl]: info }
+          );
+        } catch {
+          // Silently ignore transient network failures
+        }
+      });
+    }, 120);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [centerIndex, totalCovers]);
+
+  const activeSpotifyUrl = albums[centerIndex]?.spotifyUrl ?? '';
+  const activePreviewUrl = trackMap[activeSpotifyUrl]?.previewUrl ?? null;
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const timer = window.setTimeout(() => {
+      if (!hasInteractedRef.current) return;
+
+      if (!activePreviewUrl) {
+        audio.pause();
+        currentPlayingUrlRef.current = null;
+        return;
+      }
+
+      if (currentPlayingUrlRef.current !== activePreviewUrl) {
+        audio.src = activePreviewUrl;
+        audio.volume = 0.55;
+        currentPlayingUrlRef.current = activePreviewUrl;
+      }
+
+      if (audio.paused) {
+        audio.play().catch(() => {});
+      }
+    }, 180);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [activePreviewUrl]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    return () => {
+      if (audio) {
+        audio.pause();
+        audio.removeAttribute('src');
+      }
+    };
+  }, []);
+
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isReadyRef.current) return;
+    hasInteractedRef.current = true;
+    const audio = audioRef.current;
+    const activeUrl = albumsRef.current[centerIndex]?.spotifyUrl;
+    const preview = activeUrl ? trackMapRef.current[activeUrl]?.previewUrl : null;
+    if (audio && preview && audio.paused) {
+      if (currentPlayingUrlRef.current !== preview) {
+        audio.src = preview;
+        audio.volume = 0.55;
+        currentPlayingUrlRef.current = preview;
+      }
+      audio.play().catch(() => {});
+    }
+
     const p = physicsRef.current;
     p.isDragging = true;
     p.activePointerId = e.pointerId;
@@ -829,6 +967,9 @@ export default function CoverFlow({ albums }: CoverFlowProps) {
   }, [centerIndex, viewport.w, totalCovers]);
 
   const activeAlbum = albums[centerIndex];
+  const activeTrackTitle = activeAlbum?.spotifyUrl
+    ? trackMap[activeAlbum.spotifyUrl]?.trackTitle ?? ''
+    : '';
   const imageSizes = `${Math.round(layout.coverSize * 1.4)}px`;
 
   return (
@@ -836,14 +977,15 @@ export default function CoverFlow({ albums }: CoverFlowProps) {
       ref={containerRef}
       role="region"
       aria-roledescription="carousel"
-      aria-label="Album Cover Flow"
+      aria-label="synthavard Album Cover Flow"
       tabIndex={0}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={finishDrag}
       onPointerCancel={finishDrag}
-      className="relative h-screen w-screen overflow-hidden bg-black flex items-center justify-center select-none touch-none outline-none cursor-grab active:cursor-grabbing"
+      className="relative h-[calc(var(--vh,1vh)*100)] w-screen overflow-hidden bg-black flex items-center justify-center select-none touch-none outline-none cursor-grab active:cursor-grabbing rounded-none"
     >
+      <audio ref={audioRef} loop preload="none" aria-hidden="true" className="hidden" />
       {/* Offscreen SVG glyph measurer */}
       {SHOW_BACKGROUND_NUMBERS && (
         <svg
@@ -936,7 +1078,7 @@ export default function CoverFlow({ albums }: CoverFlowProps) {
           height: layout.coverSize,
           perspective: `${layout.perspective}px`,
           transformStyle: 'preserve-3d',
-          marginTop: `-${Math.round(layout.coverSize * 0.2)}px`,
+          marginTop: `-${Math.round(layout.coverSize * 0.28)}px`,
         }}
       >
         {visibleCovers.map((cover) => {
@@ -1042,13 +1184,13 @@ export default function CoverFlow({ albums }: CoverFlowProps) {
         })}
       </div>
 
-      {/* Minimalist active album metadata anchored beneath the reflection */}
+      {/* Minimalist active album metadata, unboxed commentary & Archivo track title */}
       {activeAlbum && (
         <div
           aria-live="polite"
           className="pointer-events-none fixed inset-x-0 z-20 flex flex-col items-center text-center px-6"
           style={{
-            top: `calc(50% + ${Math.round(layout.coverSize * 0.72)}px)`,
+            top: `calc(50% + ${Math.round(layout.coverSize * 0.68)}px)`,
           }}
         >
           <p className="text-base sm:text-lg font-semibold tracking-tight text-white max-w-md truncate">
@@ -1057,6 +1199,19 @@ export default function CoverFlow({ albums }: CoverFlowProps) {
           <p className="text-xs sm:text-sm text-neutral-400 mt-0.5 max-w-sm truncate">
             {activeAlbum.artist}
           </p>
+          {activeAlbum.commentary && (
+            <p className="mt-3 text-xs sm:text-[13px] leading-relaxed text-neutral-300 max-w-xl">
+              {activeAlbum.commentary}
+            </p>
+          )}
+          {activeTrackTitle && (
+            <p
+              className="mt-3 text-sm sm:text-[15px] font-medium tracking-tight text-white max-w-md truncate"
+              style={{ fontFamily: 'var(--font-archivo), sans-serif' }}
+            >
+              {activeTrackTitle}
+            </p>
+          )}
         </div>
       )}
     </main>

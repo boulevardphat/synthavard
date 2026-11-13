@@ -1,0 +1,169 @@
+================================================================================
+TÀI LIỆU ĐẶC TẢ KỸ THUẬT & HƯỚNG DẪN TẠO HỆ THỐNG INTRO / LOADING (BOULEVARD1ST)
+================================================================================
+Phiên bản chuẩn hóa theo mã nguồn hiện hành: React + TypeScript + Tailwind CSS
+Thẩm mỹ cốt lõi: Boulevard1st (Góc cạnh sắc nét, border-radius: 0, tối giản, Typography tràn khung)
+
+--------------------------------------------------------------------------------
+1. TỔNG QUAN KIẾN TRÚC (SCENE STATE MACHINE)
+--------------------------------------------------------------------------------
+Toàn bộ luồng Loading và Intro được điều phối bằng một State Machine trung tâm
+(`scene: SceneState`) bao phủ toàn màn hình (`w-screen h-[calc(var(--vh,1vh)*100)]`,
+`overflow-hidden`, `select-none`, `bg-black`):
+
+A. Luồng khởi động Trang chủ (Root `/`):
+   pre-intro (Nền trắng, LOADING nét đen, preload ảnh gốc)
+   -> intro-play ("phát", 500ms)
+   -> intro-blvd ("BLVD" SVG outline tràn khung, 500ms)
+   -> intro-clock-multiple (Lưới "DIGITAL ARCHIVE ED." lan từ tâm, ~1.5s - 2.5s)
+   -> main-app (Mục lục chính với nền Vespertine đã giải mã hoàn tất)
+
+B. Luồng khởi động các Mục dự án con (`/hvoc`, `/yhr`, `/hvk`, `/tntn`, `/pakvard`, `/others`):
+   <section>-loading (Nền đen, LOADING nét trắng, preload tài nguyên mục đó)
+   -> <section>-intro (Màn hình chi tiết của mục tương ứng)
+
+C. Luồng khởi động riêng của mục `#BLVD` (`/blvd`):
+   blvd-loading (Nền đen, LOADING nét trắng, 0% -> 100%)
+   -> blvd-play (500ms)
+   -> blvd-text (500ms)
+   -> blvd-title-1 (600ms)
+   -> blvd-title-2 (600ms)
+   -> blvd-color-1 (500ms)
+   -> blvd-color-2 (500ms)
+   -> blvd-color-3 (500ms, pre-mount ảnh nền blvd-color-4 bên dưới)
+   -> blvd-color-4 (500ms)
+   -> blvd-black (Trang trình diễn tương tác 4 zone của #BLVD)
+
+LƯU Ý DEEP-LINKING:
+- Khi người dùng truy cập trực tiếp vào URL con (VD: `/hvoc`, `/yhr`), hàm khởi tạo
+  `getInitialScene()` đọc `window.location.pathname` để nhảy thẳng vào state
+  `<section>-loading` tương ứng, bỏ qua `pre-intro` của trang chủ.
+
+--------------------------------------------------------------------------------
+2. ĐẶC TẢ MÀN HÌNH LOADING (SVG OUTLINE & REAL ASSET PRELOADER)
+--------------------------------------------------------------------------------
+Tất cả các màn hình Loading trong hệ thống dùng chung một ngôn ngữ thị giác:
+chữ "LOADING" rỗng ruột (chỉ có đường viền stroke) được kéo giãn sát toàn chiều rộng
+và chiều cao khung hình, lộ dần từ trái sang phải theo % tiến trình tải thật.
+
+2.1. Cấu trúc DOM & Thông số SVG chuẩn:
+  - Container ngoài:
+    + Pre-intro (Trang chủ): `absolute inset-0 flex items-center justify-center bg-white z-[100] overflow-hidden select-none w-full h-full px-2 md:px-8`
+    + Sub-pages (BLVD, HVOC, YHR, HVK, TNTN, PAKVARD, OTHERS):
+      Thay `bg-white` bằng `bg-black` và `z-[100]` thành `z-50`.
+  - Thẻ `<svg>`:
+    + `viewBox="0 0 1000 120"`
+    + `className="w-full h-full max-h-[85vh]"`
+    + `preserveAspectRatio="none"` (Bắt buộc để chữ kéo giãn theo tỷ lệ màn hình)
+  - Thẻ `<text>`:
+    + `x="50%"`, `y="50%"`, `dominantBaseline="central"`, `textAnchor="middle"`
+    + Font: `Archivo` (`fontFamily='"Archivo", sans-serif'`, `fontWeight="900"`, `fontSize="115"`)
+    + Màu nét vẽ:
+      * Trên nền trắng (`pre-intro`): `fill="none"`, `stroke="rgba(0, 0, 0, 0.95)"`, `strokeWidth="3.2"`
+      * Trên nền đen (các mục con): `fill="none"`, `stroke="rgba(255, 255, 255, 0.95)"`, `strokeWidth="3.2"`
+    + Hiệu ứng lộ dần từ trái sang phải (Clip-path Reveal):
+      ```css
+      clipPath: `inset(0 ${Math.max(0, 100 - progress)}% 0 0)`
+      WebkitClipPath: `inset(0 ${Math.max(0, 100 - progress)}% 0 0)`
+      ```
+
+2.2. Thuật toán Tải trước & Giải mã tài nguyên (Real Preload + Smooth Tween):
+  Không dùng timer giả lập hoàn toàn; thanh progress phản ánh tiến trình tải ảnh thực tế:
+  1. Gom toàn bộ URL tài nguyên (ảnh nền, logo, trang sách, icon) của màn hình đích
+     vào một mảng `Array.from(new Set(assets))` để loại bỏ trùng lặp.
+  2. Khởi tạo biến đếm `loadedCount = 0`, `currentDisplayProgress = 0`, `isFinished = false`.
+  3. Với mỗi URL, tạo `const img = new Image()`:
+     - Khi `img.onload`: gọi `img.decode().catch(() => {}).finally(onAssetLoaded)` để
+       ép trình duyệt giải mã sẵn bitmap vào bộ nhớ GPU trước khi render, tránh giật/chớp khung hình.
+     - Khi `img.onerror`: vẫn gọi `onAssetLoaded()` để không làm treo kẹt màn hình loading.
+  4. Dùng `setInterval(..., 14)` (~70fps) để tăng dần `currentDisplayProgress += 1` hướng tới
+     `realTarget = Math.round((loadedCount / totalAssets) * 100)`:
+     - Riêng ở `pre-intro`: Nếu ảnh nền chính `/vespertine.webp` chưa decode xong
+       (`!vespertineLoadedRef.current`), giới hạn trần hiển thị tối đa ở mức `85%`.
+       Chỉ khi Vespertine hoàn tất mới cho phép chạy nốt lên `100%`.
+  5. Điều kiện hoàn tất:
+     - `loadedCount >= totalAssets` VÀ `currentDisplayProgress >= 100` (cộng thêm điều kiện
+       tài nguyên trọng yếu nếu có).
+     - Khi thỏa mãn: set `isFinished = true`, xóa timer, đợi thêm `350ms` (hoặc `400ms` ở `#BLVD`)
+       để mắt người dùng kịp ghi nhận chữ `LOADING` hiển thị trọn vẹn 100%, sau đó mới chuyển scene.
+  6. Cơ chế an toàn (Safety Timeout):
+     - Luôn đặt `safetyTimer` (thường là `30000ms` - 30 giây) đề phòng mạng người dùng bị treo một gói tin.
+     - Khi hết thời gian an toàn, ép progress lên `100%` và chuyển sang scene tiếp theo sau `350ms–400ms`.
+
+--------------------------------------------------------------------------------
+3. ĐẶC TẢ CHUỖI INTRO MỞ ĐẦU CHÍNH (MAIN INTRO SEQUENCE)
+--------------------------------------------------------------------------------
+Chạy nối tiếp ngay sau khi `pre-intro` đạt 100%:
+
+3.1. KC1 - `intro-play` (Thời lượng: 500ms)
+  - Nền: Đen tuyệt đối (`bg-black`, `z-50`).
+  - Nội dung: Chữ `"phát"` đặt chính giữa màn hình.
+  - Typography: `font-sans font-normal tracking-normal text-[clamp(2.5rem,8vw,5rem)] text-white/90`.
+  - Sau `500ms` tự động chuyển sang `intro-blvd`.
+
+3.2. KC2 - `intro-blvd` (Thời lượng: 500ms)
+  - Nền: Đen tuyệt đối (`bg-black`, `z-40`).
+  - Nội dung: SVG chữ `"BLVD"` nét viền trắng kéo giãn toàn màn hình.
+  - Thông số SVG:
+    + `viewBox="0 0 400 100"`, `className="w-full h-full"`, `preserveAspectRatio="none"`.
+    + `<text x="50%" y="50%" dominantBaseline="central" textAnchor="middle" className="font-archivo font-black" fontSize="110" fill="none" stroke="rgba(255, 255, 255, 0.95)" strokeWidth="3.2">BLVD</text>`
+  - Sau `500ms` tự động chuyển sang `intro-clock-multiple`.
+
+3.3. KC3 - `intro-clock-multiple` (Component `IntroClock` mode="multiple")
+  - Mục đích: Lấp đầy toàn bộ màn hình bằng các hàng chữ `"DIGITAL ARCHIVE ED."` xuất hiện
+    lan tỏa đối xứng từ tâm ra hai cạnh trên/dưới.
+  - Cách tính số dòng tự động (`lineCount`):
+    + Dùng một thẻ `probeRef` ẩn (`-left-[9999px] opacity-0`) để đo chiều cao dòng chữ thực tế
+      (`font-archivo font-normal text-[clamp(1.4rem,4.2vw,3.8rem)] tracking-[0.05em] tabular-nums`).
+    + Cộng thêm khoảng cách dòng theo hướng màn hình:
+      `gap = 0.5vh` (dọc / portrait) hoặc `1.5vh` (ngang / landscape).
+    + `needed = Math.ceil(vh / totalLineHeight)`, làm tròn thành số lẻ gần nhất rồi `+ 2` để chữ hơi tràn nhẹ mép trên dưới ("tràn tràn"), tối thiểu `7` dòng.
+  - Hoạt ảnh xuất hiện bậc thang:
+    + `centerIndex = Math.floor(lineCount / 2)`.
+    + Dùng `requestAnimationFrame` tính `elapsed = now - startTime`.
+    + Tốc độ cố định: `stepDuration = 40ms` mỗi bước khoảng cách (`dist = Math.abs(i - centerIndex)`).
+    + Dòng thứ `i` hiện thị (`visibility: visible`) khi `dist <= visibleDistance`, không dùng transition mờ (hiện dứt khoát từng nhịp 40ms).
+  - Kết thúc & Chuyển vào Trang chủ (`main-app`):
+    + Khi `visibleDistance` đạt `maxDist` (tất cả các dòng đã hiện), giữ nguyên toàn khung hình trong `360ms`.
+    + Kiểm tra cờ `vespertineLoadedRef.current === true`:
+      * Nếu đã tải & decode xong -> `setScene('main-app')`.
+      * Nếu chưa xong -> bật cờ `pendingIntroCompleteRef.current = true` để callback `onLoaded` của ảnh Vespertine tự chuyển ngay lập tức khi tải xong.
+    + Có timer dự phòng tối đa `5000ms` trong `App.tsx` phòng trường hợp `requestAnimationFrame` bị trình duyệt tạm ngưng ở tab nền.
+
+--------------------------------------------------------------------------------
+4. ĐẶC TẢ CHUỖI INTRO RIÊNG CỦA `#BLVD` (BLVD SEQUENCE)
+--------------------------------------------------------------------------------
+Sau khi `blvd-loading` đạt 100% và dừng `400ms`:
+
+  1. `blvd-play` (500ms): Nền đen, chữ `"phát"` (tương tự KC1).
+  2. `blvd-text` (500ms): Nền đen, SVG `"BLVD"` nét trắng kéo giãn toàn màn hình (tương tự KC2).
+  3. `blvd-title-1` (600ms): Nền đen, hiện dòng chữ `#BLVD` căn giữa (`font-archivo font-normal text-white text-[clamp(2.2rem,6.5vw,5.2rem)] tracking-wide`). Dòng `CHANGE IN MIND` bên dưới đang ẩn (`opacity-0`) để giữ nguyên bố cục chiều cao không bị giật khi hiện tiếp.
+  4. `blvd-title-2` (600ms): Giữ nguyên `#BLVD`, bật hiển thị dòng `CHANGE IN MIND` (`opacity-100`).
+  5. `blvd-color-1` (500ms): Nền màu `#474c5a`, chữ font `Turista` (`text-[clamp(3.5rem,11vw,8rem)]`): `#BLVD` màu trắng + `15` màu `#EAD478`.
+  6. `blvd-color-2` (500ms): Nền xanh `#8ace00` (Brat Green), khung vuông `.brat-box` căn giữa chứa chữ `#blvd16` font Arial đen kèm hiệu ứng `filter: blur(1.8px)` và `transform: scaleY(1.08)`.
+  7. `blvd-color-3` (500ms): Nền xám sáng `#E6E6E6`, hiển thị logo `#BLVD17` đảo màu (`invert brightness-105`).
+     - KỸ THUẬT CHỐNG NHÁY KHUNG HÌNH (ZERO-DELAY PRE-MOUNT): Ngay trong lúc đang ở `blvd-color-3`, hệ thống đã mount sẵn lớp ảnh nền của `blvd-color-4` ở layer `z-40` phía dưới `z-50` để GPU dựng texture hoàn chỉnh trước khi chuyển cảnh.
+  8. `blvd-color-4` (500ms): Hiển thị lớp ảnh nền `#BLVD18` tràn màn hình (`object-cover`).
+  9. `blvd-black`: Chuyển vào không gian trình diễn chính của `#BLVD` (4 zone trượt dọc).
+
+--------------------------------------------------------------------------------
+5. QUY TẮC & CHECKLIST TÁI TẠO KỸ THUẬT (ANTI-GLITCH & RESPONSIVE)
+--------------------------------------------------------------------------------
+[1] Biến CSS `--vh`:
+    Luôn tính `let vh = window.innerHeight * 0.01` và gán vào `--vh` của `documentElement`
+    để tránh lỗi nhảy chiều cao khi thanh địa chỉ trình duyệt mobile ẩn/hiện (`h-[calc(var(--vh,1vh)*100)]`).
+    Chỉ cập nhật lại `--vh` khi chiều rộng thay đổi (xoay màn hình) hoặc chiều cao biến động > 150px.
+
+[2] Bảo vệ bộ nhớ & Hủy Side-effect:
+    Mọi `useEffect` chứa `setInterval`, `setTimeout`, hoặc `requestAnimationFrame`
+    BẮT BUỘC phải trả về hàm cleanup (`clearInterval`, `clearTimeout`, `cancelAnimationFrame`)
+    khi `scene` thay đổi hoặc component bị unmount.
+
+[3] Font bắt buộc phải nạp trước trong CSS:
+    - `Archivo` (weight 100..900, width 62..100) cho `LOADING`, `BLVD`, `DIGITAL ARCHIVE ED.`.
+    - `Turista` (`/fonts/Turista Gorda NF W01 Regular.ttf`) cho `#BLVD15`.
+    - `ArialCustom` / `Arial` cho `#blvd16`.
+
+[4] Không bo góc (Boulevard1st Design Rule):
+    Toàn bộ container, nút bấm, khung ảnh đều giữ `rounded-none` (`border-radius: 0`).
+================================================================================

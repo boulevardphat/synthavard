@@ -84,6 +84,22 @@
 - Nội dung thay đổi:
   + Sửa lỗi `TimeoutError` từ endpoint `/_next/image` khi server tải đồng thời hàng loạt file ảnh PNG dung lượng lớn từ `i.ibb.co` bằng cách thêm `directImageLoader` cho `<Image>` (tải trực tiếp qua CDN trình duyệt thay vì nghẽn qua proxy Node.js) và giảm `WINDOW_RADIUS` từ 8 xuống 7 để khớp đúng vùng hiển thị.
 
+## Lần 13 (Turn 13)
+- Thời gian: Hiện tại
+- Nội dung thay đổi:
+  + Chuyển nguồn dữ liệu CSV sang `public/assets/aistudio/albums__1__e5a35dab.csv`, đọc thêm cột `Link Spotify` (ẩn hoàn toàn khỏi giao diện) và cột `Người đời hay nói`.
+  + Bổ sung subset `vietnamese` và `latin-ext` cho font `Archivo` trong `app/layout.tsx`.
+  + Tạo `lib/spotify-track.ts` và API route `app/api/album-track/route.ts` để tự động lấy tên bài hát thực tế (kèm audio preview chạy nền ẩn qua thẻ `<audio>` sau khi người dùng tương tác) từ link Spotify ẩn của từng album.
+  + Hiển thị nguyên văn nội dung nhận xét (`commentary`) phía dưới cover mà không gắn nhãn hay đóng khung, kèm tên bài hát đang phát bằng font `Archivo` ở dưới cùng, không có nút, icon hay text phụ nào khác.
+  + Điều chỉnh nhẹ vị trí dọc (`marginTop: -0.28 * coverSize`, metadata `top: calc(50% + 0.68 * coverSize)`) để cân đối khoảng thở trên cả desktop và mobile.
+
+## Lần 14 (Turn 14)
+- Thời gian: Hiện tại
+- Nội dung thay đổi:
+  + Đổi tên dự án trong mã nguồn (`package.json`, `metadata.json`, `app/layout.tsx` metadata, `lib/spotify-track.ts` User-Agent, `aria-label`) thành `synthavard` (không đưa tên lên giao diện chính).
+  + Tạo màn hình `LoadingScreen` (`components/LoadingScreen.tsx`) chuẩn theo đặc tả kỹ thuật: chữ `LOADING` rỗng ruột (SVG outline `fill="none"`, `stroke="rgba(255, 255, 255, 0.95)"`, `strokeWidth="3.2"`, font `Archivo` weight 900, `viewBox="0 0 1000 120"`, `preserveAspectRatio="none"`) trên nền đen tuyệt đối, lộ dần từ trái sang phải qua `clipPath` theo tiến trình tải và giải mã (`img.decode()`) thực tế toàn bộ 165 ảnh bìa album trong synthavard.
+  + Tạo `SynthavardApp` (`components/SynthavardApp.tsx`) quản lý biến `--vh` chống nhảy khung hình mobile và chỉ tắt màn hình loading sau khi toàn bộ ảnh đã tải xong (giữ 350ms tại 100%, kèm `safetyTimer` 45s dự phòng).
+
 
 
 
