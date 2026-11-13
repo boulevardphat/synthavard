@@ -1,0 +1,89 @@
+# CHANGELOG / ROLLBACK LOG
+
+## Lần 1 (Turn 1)
+- Thời gian: Khởi tạo dự án
+- Nội dung thay đổi:
+  + Cập nhật metadata.json (Tên: Void Studio)
+  + Thiết lập app/globals.css và app/layout.tsx với font Archivo và nền đen tuyền (pitch black).
+  + Tạo trang trống ban đầu.
+
+## Lần 2 (Turn 2)
+- Thời gian: Hiện tại
+- Nội dung thay đổi:
+  + Tạo dải ô vuông theo chiều dọc nằm ở center màn hình.
+  + Các ô vuông có góc nghiêng ngẫu nhiên (-6°, 12°, -14°, 9°, -8°, 15°).
+  + Hiệu ứng đè lên nhau từ trên xuống dưới (-mt-20 / -mt-24).
+  + Thêm hiệu ứng hover nổi bật và animation xuất hiện mượt mà bằng motion/react.
+
+## Lần 3 (Turn 3)
+- Thời gian: Hiện tại
+- Nội dung thay đổi:
+  + Xóa toàn bộ chữ, chú thích, nhãn, border và hiệu ứng thừa trong các ô vuông.
+  + Hiển thị 7 ô vuông trắng tinh (#FFFFFF), góc vuông sắc nét (rounded-none) xếp dọc chính giữa màn hình trên nền đen (#000000).
+  + Điều chỉnh góc nghiêng (-1.2°, 1.6°, 8.5°, -0.6°, 0.9°, 2.1°, -6.8°), kích thước (w-28..w-36) và độ đè nhẹ từ trên xuống dưới (-mt-4 / -mt-5) kèm bóng đổ nhẹ phân tách lớp, đúng theo hình mẫu.
+
+## Lần 4 (Turn 4)
+- Thời gian: Hiện tại
+- Nội dung thay đổi:
+  + Tạo dải 200 ô vuông trắng (#FFFFFF) xếp dọc ở giữa màn hình với cơ chế virtualized rendering (chỉ render vùng nhìn thấy quanh vị trí hiện tại).
+  + Phân bố góc nghiêng đa tầng: chủ yếu nghiêng vừa (2.0°–9.8°) xen kẽ tỉ lệ ~24% nghiêng sâu hơn (12.5°–24.0°), kèm ràng buộc chênh lệch góc tối thiểu (>= 7.5°–9.5°) giữa hai ô liền kề để luôn thấy rõ hai ô đang nghiêng riêng biệt.
+  + Tích hợp physics engine vuốt/cuộn hai chế độ: bước nhảy từng ô (step-snap) khi vuốt/cuộn chậm và trôi quán tính mượt mà (fluid momentum) khi vuốt/cuộn nhanh, tự hút về tâm khi dừng.
+  + Ô vuông đang ở tâm tự động phóng to (scale ~2.22x), căn chính giữa màn hình và xoay về góc 0° (đứng thẳng), có hiệu ứng nghiêng động và độ trễ theo hướng vuốt lên/vuốt xuống.
+
+## Lần 5 (Turn 5)
+- Thời gian: Hiện tại
+- Nội dung thay đổi:
+  + Tăng kích thước ô vuông trung tâm lớn hơn ~1.5x (tới ~396px trên desktop 900px, tự thích nghi theo viewport).
+  + Tách dải ô vuông phía trên và phía dưới ra xa ô trung tâm bằng khoảng đen rõ rệt (centerGap ~20–36px) để phân tách bố cục chính giữa.
+  + Áp dụng phối cảnh thu nhỏ dần về hai đầu (STACK_DECAY = 0.79): ô càng sát trung tâm càng to hơn, ô càng xa càng nhỏ dần và xếp lớp từ gần tới xa (z-index & bóng đổ theo chiều sâu), vẫn giữ góc vuông sắc nét (rounded-none).
+
+## Lần 6 (Turn 6)
+- Thời gian: Hiện tại
+- Nội dung thay đổi:
+  + Tăng mạnh kích thước dải ô vuông phía trên và phía dưới (stackStartSize từ 0.255 lên 0.53 * activeSize) để hai phần trên/dưới to và cân xứng hơn.
+  + Tăng độ chênh lệch thu nhỏ giữa từng ô (STACK_DECAY từ 0.79 xuống 0.67, stackStep = 0.54 * stackStartSize) để thấy rõ sự thay đổi kích thước qua từng bậc.
+  + Thu gọn độ lan của bóng đổ ở ô trung tâm (từ 64px xuống 12px) và gán baseSize = stackStartSize, loại bỏ hiện tượng bóng đen từ ô giữa loang xám lên mặt ô vuông bên dưới.
+
+## Lần 7 (Turn 7)
+- Thời gian: Hiện tại
+- Nội dung thay đổi:
+  + Xóa toàn bộ bố cục dải dọc cũ, chuyển sang Apple Cover Flow ngang chuẩn 3D (perspective + preserve-3d, cánh trái xoay rotateY(+54°), cánh phải xoay rotateY(-54°), ô trung tâm đứng thẳng 0° tiến ra phía trước translateZ(110px) và phóng to 1.32x).
+  + Hiển thị tạm thời 30 ô vuông trắng trơn (#FFFFFF, góc vuông rounded-none) trên nền đen tuyền (#000000), sử dụng virtualized window (WINDOW_RADIUS = 8) sẵn sàng mở rộng mượt mà cho 200+ ô.
+  + Thêm hiệu ứng phản chiếu bóng gương mờ dưới đáy mỗi ô cover bằng CSS mask gradient xuyên trình duyệt.
+  + Hỗ trợ vuốt ngang cảm ứng/chuột, cuộn chuột/trackpad cả trục dọc lẫn ngang, nhấn vào ô bên cạnh để lật tới tâm, và phím mũi tên Trái/Phải.
+
+## Lần 8 (Turn 8)
+- Thời gian: Hiện tại
+- Nội dung thay đổi:
+  + Kích hoạt đầy đủ variable axes cho font Archivo trong app/layout.tsx (weight: 'variable' 100–900, axes: ['wdth'] 62–125).
+  + Bổ sung dải số thứ tự nền (01, 02, ... N) chạy liền kề phía sau Apple Cover Flow (tuyệt đối không gắn số lên cover trắng).
+  + Đo chính xác vùng mực thực chất của ký tự bằng SVG getBBox() theo từng mức wght/wdth và dùng SVG preserveAspectRatio="none" để STRETCH thực sự chạm sát mép trên/dưới và dãn khớp theo chiều ngang vùng hiển thị.
+  + Đồng bộ tức thì theo vị trí cuộn: số đang chọn đậm tối đa (wght 900, wdth 125) và dãn rộng phủ màn hình; khi lướt sang số kế tiếp, số cũ mỏng dần (wght -> 100, wdth -> 62), ép thon lại và thu về bên trái trong khi số mới dãn rộng phủ màn hình và số tiếp theo xuất hiện hẹp ngay sát bên phải.
+
+## Lần 9 (Turn 9)
+- Thời gian: Hiện tại
+- Nội dung thay đổi:
+  + Khắc phục nguyên nhân SVG getBBox() trả về khung em-box có khoảng trắng ascender/descender ở trên và dưới chữ số.
+  + Bổ sung phép đo pixel mực thực chất (measureTrueInkBBox) qua offscreen canvas scan kết hợp SVG width theo trục wdth để cắt bỏ hoàn toàn khoảng thừa trên/dưới/hai bên, giúp nét chữ số stretch chạm sát 100% mép trên và mép dưới của màn hình trên cả desktop và mobile.
+
+## Lần 10 (Turn 10)
+- Thời gian: Hiện tại
+- Nội dung thay đổi:
+  + Đăng ký domain ảnh `i.ibb.co` vào `next.config.ts`.
+  + Tách giao diện Cover Flow sang `components/CoverFlow.tsx` và đọc toàn bộ danh sách 165 album từ `public/assets/aistudio/albums_97a60c60.csv` trong Server Component `app/page.tsx` (hỗ trợ đầy đủ CSV có dấu ngoặc kép).
+  + Hiển thị ảnh bìa album thực tế trên cả các ô cover và lớp phản chiếu bóng gương lộn ngược phía dưới, kèm tên album và nghệ sĩ tối giản bên dưới ô đang chọn.
+  + Mở rộng vùng đo offscreen canvas lên 960x340 để đo chuẩn mực cho các số có 3 chữ số (100–165).
+
+## Lần 11 (Turn 11)
+- Thời gian: Hiện tại
+- Nội dung thay đổi:
+  + Tạm ẩn dải số thứ tự nền (`SHOW_BACKGROUND_NUMBERS = false`) trong `components/CoverFlow.tsx` để giữ nguyên nền đen thuần cho Apple Cover Flow 165 album, sẵn sàng bật lại hoặc thay thế phương án nền khác khi cần.
+
+
+
+
+
+
+
+
+

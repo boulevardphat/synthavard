@@ -1,0 +1,6 @@
+{
+  "name": "Void Studio",
+  "description": "Pitch black workspace with Archivo font",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
