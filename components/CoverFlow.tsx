@@ -31,10 +31,12 @@ interface BBox {
 }
 
 const SHOW_BACKGROUND_NUMBERS = false;
-const WINDOW_RADIUS = 8;
+const WINDOW_RADIUS = 7;
 const BG_WINDOW_RADIUS = 5;
 const SVG_BASE_W = 1000;
 const MEASURE_FONT_SIZE = 200;
+
+const directImageLoader = ({ src }: { src: string }) => src;
 
 const WEIGHT_STOPS = [100, 300, 500, 700, 900] as const;
 const WIDTH_STOPS = [62, 77.75, 93.5, 109.25, 125] as const;
@@ -983,6 +985,7 @@ export default function CoverFlow({ albums }: CoverFlowProps) {
               >
                 {!isFailed ? (
                   <Image
+                    loader={directImageLoader}
                     src={cover.imageUrl}
                     alt={`${cover.title} — ${cover.artist}`}
                     fill
@@ -1022,6 +1025,7 @@ export default function CoverFlow({ albums }: CoverFlowProps) {
                 <div className="relative w-full h-full bg-neutral-900 rounded-none overflow-hidden -scale-y-100">
                   {!isFailed && (
                     <Image
+                      loader={directImageLoader}
                       src={cover.imageUrl}
                       alt=""
                       fill

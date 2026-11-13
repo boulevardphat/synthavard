@@ -79,6 +79,12 @@
 - Nội dung thay đổi:
   + Tạm ẩn dải số thứ tự nền (`SHOW_BACKGROUND_NUMBERS = false`) trong `components/CoverFlow.tsx` để giữ nguyên nền đen thuần cho Apple Cover Flow 165 album, sẵn sàng bật lại hoặc thay thế phương án nền khác khi cần.
 
+## Lần 12 (Turn 12)
+- Thời gian: Hiện tại
+- Nội dung thay đổi:
+  + Sửa lỗi `TimeoutError` từ endpoint `/_next/image` khi server tải đồng thời hàng loạt file ảnh PNG dung lượng lớn từ `i.ibb.co` bằng cách thêm `directImageLoader` cho `<Image>` (tải trực tiếp qua CDN trình duyệt thay vì nghẽn qua proxy Node.js) và giảm `WINDOW_RADIUS` từ 8 xuống 7 để khớp đúng vùng hiển thị.
+
+
 
 
 
