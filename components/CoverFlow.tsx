@@ -1,9 +1,16 @@
 'use client';
 
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import Image from 'next/image';
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
-import type { AlbumTrackInfo } from '@/lib/spotify-track';
+import FlipAlbumCard from '@/components/FlipAlbumCard';
+import type { AlbumTrackInfo, TrackEntry } from '@/lib/spotify-track';
 
 export interface AlbumItem {
   id: number;
@@ -42,8 +49,6 @@ const BG_WINDOW_RADIUS = 5;
 const SVG_BASE_W = 1000;
 const MEASURE_FONT_SIZE = 200;
 
-const directImageLoader = ({ src }: { src: string }) => src;
-
 const WEIGHT_STOPS = [100, 300, 500, 700, 900] as const;
 const WIDTH_STOPS = [62, 77.75, 93.5, 109.25, 125] as const;
 
@@ -68,7 +73,7 @@ function smoothCosEase(t: number) {
 
 function computeLayout(w: number, h: number): CoverFlowLayout {
   const coverSize = Math.round(clamp(Math.min(w * 0.34, h * 0.36), 148, 264));
-  const perspective = Math.round(coverSize * 4.2);
+  const perspective = Math.round(coverSize * 2.85);
   const wingOffset = Math.round(coverSize * 1.02);
   const wingStep = Math.round(coverSize * 0.27);
   const dragScale = Math.max(85, Math.round(coverSize * 0.55));
@@ -238,21 +243,14 @@ function getCoverMetrics(
       ? 0.9 + 0.1 * centerBlend
       : clamp(0.9 - (absDist - 1) * 0.045, 0.58, 0.9);
 
+  const dimOpacity = clamp(1 - brightness, 0, 0.7);
   const opacity = absDist > 6.5 ? clamp(1 - (absDist - 6.5) / 1.5, 0, 1) : 1;
-
-  const sideShadow =
-    centerBlend > 0.65
-      ? '0 22px 48px rgba(0, 0, 0, 0.85)'
-      : distance < 0
-        ? '10px 8px 24px rgba(0, 0, 0, 0.72)'
-        : '-10px 8px 24px rgba(0, 0, 0, 0.72)';
 
   return {
     transform: `translate3d(${x.toFixed(2)}px, 0px, ${z.toFixed(2)}px) rotateY(${rotateY.toFixed(2)}deg) scale(${scale.toFixed(4)})`,
     zIndex,
-    filter: `brightness(${brightness.toFixed(3)})`,
+    dimOpacity,
     opacity,
-    sideShadow,
   };
 }
 
@@ -318,9 +316,23 @@ export default function CoverFlow({
   const hasInteractedRef = useRef(false);
   const currentPlayingUrlRef = useRef<string | null>(null);
   const isReadyRef = useRef(isReady);
+  const gestureRef = useRef<{
+    startX: number;
+    startY: number;
+    pointerType: string;
+    axis: 'none' | 'x' | 'y';
+    captured: boolean;
+  }>({
+    startX: 0,
+    startY: 0,
+    pointerType: 'mouse',
+    axis: 'none',
+    captured: false,
+  });
 
   const itemRefs = useRef<Map<number, HTMLDivElement>>(new Map());
-  const surfaceRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const frontDimRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const reflectionDimRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const bgSvgRefs = useRef<Map<number, SVGSVGElement>>(new Map());
   const bgTextRefs = useRef<Map<number, SVGTextElement>>(new Map());
   const bboxCacheRef = useRef<Map<string, BBox[]>>(new Map());
@@ -330,17 +342,24 @@ export default function CoverFlow({
   const [viewport, setViewport] = useState({ w: 1440, h: 900 });
   const [measureVersion, setMeasureVersion] = useState(0);
   const [failedImages, setFailedImages] = useState<Record<number, boolean>>({});
-  const [trackMap, setTrackMap] = useState<Record<string, AlbumTrackInfo>>(() =>
-    initialTrack && albums[0]?.spotifyUrl
-      ? { [albums[0].spotifyUrl]: initialTrack }
+  const [trackMap, setTrackMap] = useState<Record<string, TrackEntry[]>>(() =>
+    initialTrack?.tracks?.length && albums[0]?.spotifyUrl
+      ? { [albums[0].spotifyUrl]: initialTrack.tracks }
       : {}
   );
+  const [trackCursor, setTrackCursor] = useState<{
+    albumId: number;
+    index: number;
+  }>({ albumId: 0, index: 0 });
+  const [flippedId, setFlippedId] = useState<number | null>(null);
 
   const layoutRef = useRef<CoverFlowLayout>(DEFAULT_LAYOUT);
   const viewportRef = useRef({ w: 1440, h: 900 });
   const reducedMotionRef = useRef(false);
   const albumsRef = useRef<AlbumItem[]>(albums);
   const trackMapRef = useRef(trackMap);
+  const activePreviewUrlRef = useRef<string | null>(null);
+  const flippedIdRef = useRef<number | null>(null);
 
   useEffect(() => {
     albumsRef.current = albums;
@@ -353,6 +372,10 @@ export default function CoverFlow({
   useEffect(() => {
     isReadyRef.current = isReady;
   }, [isReady]);
+
+  useEffect(() => {
+    flippedIdRef.current = flippedId;
+  }, [flippedId]);
 
   const physicsRef = useRef({
     pos: 0,
@@ -482,13 +505,15 @@ export default function CoverFlow({
         );
         el.style.transform = metrics.transform;
         el.style.zIndex = String(metrics.zIndex);
-        el.style.opacity = String(metrics.opacity);
-        el.style.filter = metrics.filter;
+        el.style.opacity =
+          metrics.opacity < 0.999 ? String(metrics.opacity) : '';
 
-        const surface = surfaceRefs.current.get(idx);
-        if (surface) {
-          surface.style.boxShadow = metrics.sideShadow;
-        }
+        const dimStr =
+          metrics.dimOpacity > 0.001 ? metrics.dimOpacity.toFixed(3) : '0';
+        const frontDim = frontDimRefs.current.get(idx);
+        if (frontDim) frontDim.style.opacity = dimStr;
+        const reflDim = reflectionDimRefs.current.get(idx);
+        if (reflDim) reflDim.style.opacity = dimStr;
       });
 
       if (!SHOW_BACKGROUND_NUMBERS) return;
@@ -610,13 +635,14 @@ export default function CoverFlow({
       );
       el.style.transform = metrics.transform;
       el.style.zIndex = String(metrics.zIndex);
-      el.style.opacity = String(metrics.opacity);
-      el.style.filter = metrics.filter;
+      el.style.opacity = metrics.opacity < 0.999 ? String(metrics.opacity) : '';
 
-      const surface = surfaceRefs.current.get(idx);
-      if (surface) {
-        surface.style.boxShadow = metrics.sideShadow;
-      }
+      const dimStr =
+        metrics.dimOpacity > 0.001 ? metrics.dimOpacity.toFixed(3) : '0';
+      const frontDim = frontDimRefs.current.get(idx);
+      if (frontDim) frontDim.style.opacity = dimStr;
+      const reflDim = reflectionDimRefs.current.get(idx);
+      if (reflDim) reflDim.style.opacity = dimStr;
     });
 
     if (!SHOW_BACKGROUND_NUMBERS) return;
@@ -665,8 +691,20 @@ export default function CoverFlow({
     };
 
     const handleWheel = (e: WheelEvent) => {
+      if (!isReadyRef.current) {
+        e.preventDefault();
+        return;
+      }
+
+      const canScrollVertically = el.scrollHeight > el.clientHeight + 2;
+      const isVerticalDominant =
+        !e.shiftKey && Math.abs(e.deltaY) >= Math.abs(e.deltaX);
+
+      if (canScrollVertically && isVerticalDominant) {
+        return;
+      }
+
       e.preventDefault();
-      if (!isReadyRef.current) return;
       markInteracted();
       const p = physicsRef.current;
       const now = performance.now();
@@ -677,6 +715,11 @@ export default function CoverFlow({
       else if (e.deltaMode === 2) delta *= window.innerWidth;
 
       if (Math.abs(delta) < 0.5) return;
+
+      if (flippedIdRef.current !== null) {
+        flippedIdRef.current = null;
+        setFlippedId(null);
+      }
 
       const dt = now - p.lastWheelTime;
       p.lastWheelTime = now;
@@ -725,6 +768,10 @@ export default function CoverFlow({
       if (e.key === 'ArrowRight' || e.key === 'PageDown') {
         e.preventDefault();
         markInteracted();
+        if (flippedIdRef.current !== null) {
+          flippedIdRef.current = null;
+          setFlippedId(null);
+        }
         const step = e.key === 'PageDown' ? 5 : 1;
         const base = p.mode === 'snap' ? p.snapTarget : Math.round(p.pos);
         p.snapTarget = clamp(base + step, 0, maxIndex);
@@ -732,6 +779,10 @@ export default function CoverFlow({
       } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
         e.preventDefault();
         markInteracted();
+        if (flippedIdRef.current !== null) {
+          flippedIdRef.current = null;
+          setFlippedId(null);
+        }
         const step = e.key === 'PageUp' ? 5 : 1;
         const base = p.mode === 'snap' ? p.snapTarget : Math.round(p.pos);
         p.snapTarget = clamp(base - step, 0, maxIndex);
@@ -739,13 +790,28 @@ export default function CoverFlow({
       } else if (e.key === 'Home') {
         e.preventDefault();
         markInteracted();
+        if (flippedIdRef.current !== null) {
+          flippedIdRef.current = null;
+          setFlippedId(null);
+        }
         p.snapTarget = 0;
         p.mode = 'snap';
       } else if (e.key === 'End') {
         e.preventDefault();
         markInteracted();
+        if (flippedIdRef.current !== null) {
+          flippedIdRef.current = null;
+          setFlippedId(null);
+        }
         p.snapTarget = maxIndex;
         p.mode = 'snap';
+      } else if (e.key === 'Enter' || e.key === ' ') {
+        const active = albumsRef.current[p.lastCenterIndex];
+        if (active?.commentary) {
+          e.preventDefault();
+          markInteracted();
+          setFlippedId((prev) => (prev === active.id ? null : active.id));
+        }
       }
     };
 
@@ -777,16 +843,14 @@ export default function CoverFlow({
           );
           if (!res.ok) return;
           const data = (await res.json()) as {
-            trackTitle?: string | null;
-            previewUrl?: string | null;
+            tracks?: TrackEntry[];
           };
-          if (cancelled || !data?.trackTitle) return;
-          const info: AlbumTrackInfo = {
-            trackTitle: data.trackTitle,
-            previewUrl: data.previewUrl ?? null,
-          };
+          if (cancelled || !Array.isArray(data?.tracks) || data.tracks.length === 0) {
+            return;
+          }
+          const tracks = data.tracks;
           setTrackMap((prev) =>
-            prev[spotifyUrl] ? prev : { ...prev, [spotifyUrl]: info }
+            prev[spotifyUrl] ? prev : { ...prev, [spotifyUrl]: tracks }
           );
         } catch {
           // Silently ignore transient network failures
@@ -801,7 +865,21 @@ export default function CoverFlow({
   }, [centerIndex, totalCovers]);
 
   const activeSpotifyUrl = albums[centerIndex]?.spotifyUrl ?? '';
-  const activePreviewUrl = trackMap[activeSpotifyUrl]?.previewUrl ?? null;
+  const activeTracks = useMemo(
+    () => (activeSpotifyUrl ? trackMap[activeSpotifyUrl] ?? [] : []),
+    [activeSpotifyUrl, trackMap]
+  );
+  const currentTrackIdx =
+    trackCursor.albumId === centerIndex &&
+    trackCursor.index < activeTracks.length
+      ? trackCursor.index
+      : 0;
+  const currentTrack = activeTracks[currentTrackIdx] ?? activeTracks[0] ?? null;
+  const activePreviewUrl = currentTrack?.previewUrl ?? null;
+
+  useEffect(() => {
+    activePreviewUrlRef.current = activePreviewUrl;
+  }, [activePreviewUrl]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -842,12 +920,37 @@ export default function CoverFlow({
     };
   }, []);
 
+  const handleAudioEnded = () => {
+    if (activeTracks.length === 0) return;
+
+    let nextIdx = (currentTrackIdx + 1) % activeTracks.length;
+    if (activeTracks.length > 1) {
+      for (let offset = 1; offset <= activeTracks.length; offset++) {
+        const candidateIdx = (currentTrackIdx + offset) % activeTracks.length;
+        if (activeTracks[candidateIdx]?.previewUrl) {
+          nextIdx = candidateIdx;
+          break;
+        }
+      }
+    }
+
+    if (nextIdx === currentTrackIdx) {
+      const audio = audioRef.current;
+      if (audio && activePreviewUrl) {
+        audio.currentTime = 0;
+        audio.play().catch(() => {});
+      }
+      return;
+    }
+
+    setTrackCursor({ albumId: centerIndex, index: nextIdx });
+  };
+
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!isReadyRef.current) return;
     hasInteractedRef.current = true;
     const audio = audioRef.current;
-    const activeUrl = albumsRef.current[centerIndex]?.spotifyUrl;
-    const preview = activeUrl ? trackMapRef.current[activeUrl]?.previewUrl : null;
+    const preview = activePreviewUrlRef.current;
     if (audio && preview && audio.paused) {
       if (currentPlayingUrlRef.current !== preview) {
         audio.src = preview;
@@ -856,6 +959,14 @@ export default function CoverFlow({
       }
       audio.play().catch(() => {});
     }
+
+    gestureRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      pointerType: e.pointerType,
+      axis: 'none',
+      captured: false,
+    };
 
     const p = physicsRef.current;
     p.isDragging = true;
@@ -866,15 +977,55 @@ export default function CoverFlow({
     p.dragStartPos = p.pos;
     p.dragStartSnap = Math.round(p.pos);
     p.pointerSamples = [{ x: e.clientX, t: performance.now() }];
-    e.currentTarget.setPointerCapture(e.pointerId);
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const p = physicsRef.current;
     if (!p.isDragging || p.activePointerId !== e.pointerId) return;
 
+    const g = gestureRef.current;
+    if (g.axis === 'y') return;
+
     const maxIndex = Math.max(0, totalCovers - 1);
     const now = performance.now();
+
+    if (g.axis === 'none') {
+      const totalDx = Math.abs(e.clientX - g.startX);
+      const totalDy = Math.abs(e.clientY - g.startY);
+      if (totalDx < 5 && totalDy < 5) return;
+
+      if (g.pointerType !== 'mouse' && totalDy > totalDx * 1.1) {
+        g.axis = 'y';
+        p.isDragging = false;
+        p.activePointerId = null;
+        p.mode = 'snap';
+        p.snapTarget = clamp(Math.round(p.pos), 0, maxIndex);
+        return;
+      }
+
+      g.axis = 'x';
+      p.lastPointerX = e.clientX;
+      p.pointerSamples = [{ x: e.clientX, t: now }];
+      if (!g.captured) {
+        g.captured = true;
+        try {
+          e.currentTarget.setPointerCapture(e.pointerId);
+        } catch {
+          // Ignore if pointer capture is unavailable
+        }
+      }
+      if (flippedIdRef.current !== null) {
+        flippedIdRef.current = null;
+        setFlippedId(null);
+      }
+      return;
+    }
+
+    if (flippedIdRef.current !== null) {
+      flippedIdRef.current = null;
+      setFlippedId(null);
+    }
+
     const dx = e.clientX - p.lastPointerX;
     p.lastPointerX = e.clientX;
 
@@ -900,8 +1051,18 @@ export default function CoverFlow({
     const p = physicsRef.current;
     if (!p.isDragging || p.activePointerId !== e.pointerId) return;
 
+    const wasAxisX = gestureRef.current.axis === 'x';
     p.isDragging = false;
     p.activePointerId = null;
+    gestureRef.current.axis = 'none';
+    gestureRef.current.captured = false;
+
+    if (!wasAxisX) {
+      p.mode = 'snap';
+      p.velocity = 0;
+      p.snapTarget = clamp(Math.round(p.pos), 0, Math.max(0, totalCovers - 1));
+      return;
+    }
 
     const maxIndex = Math.max(0, totalCovers - 1);
     const now = performance.now();
@@ -939,12 +1100,67 @@ export default function CoverFlow({
     }
   };
 
-  const handleCoverClick = (idx: number) => {
-    const p = physicsRef.current;
-    if (Math.abs(p.pos - p.dragStartPos) > 0.08) return;
-    p.snapTarget = idx;
-    p.mode = 'snap';
-  };
+  const handleCoverClick = useCallback(
+    (idx: number) => {
+      if (!isReadyRef.current) return;
+      const p = physicsRef.current;
+      if (Math.abs(p.pos - p.dragStartPos) > 0.08) return;
+
+      const isCentered =
+        idx === p.lastCenterIndex && Math.abs(p.pos - idx) < 0.22;
+      if (isCentered) {
+        const cover = albumsRef.current[idx];
+        if (!cover?.commentary) return;
+        setFlippedId((prev) => (prev === idx ? null : idx));
+        return;
+      }
+
+      if (flippedIdRef.current !== null) {
+        flippedIdRef.current = null;
+        setFlippedId(null);
+      }
+      p.snapTarget = idx;
+      p.mode = 'snap';
+    },
+    []
+  );
+
+  const handleImageError = useCallback((id: number) => {
+    setFailedImages((prev) => (prev[id] ? prev : { ...prev, [id]: true }));
+  }, []);
+
+  const registerItemRef = useCallback(
+    (id: number, el: HTMLDivElement | null) => {
+      if (el) {
+        itemRefs.current.set(id, el);
+      } else {
+        itemRefs.current.delete(id);
+      }
+    },
+    []
+  );
+
+  const registerFrontDimRef = useCallback(
+    (id: number, el: HTMLDivElement | null) => {
+      if (el) {
+        frontDimRefs.current.set(id, el);
+      } else {
+        frontDimRefs.current.delete(id);
+      }
+    },
+    []
+  );
+
+  const registerReflectionDimRef = useCallback(
+    (id: number, el: HTMLDivElement | null) => {
+      if (el) {
+        reflectionDimRefs.current.set(id, el);
+      } else {
+        reflectionDimRefs.current.delete(id);
+      }
+    },
+    []
+  );
 
   const visibleCovers = useMemo(() => {
     if (totalCovers === 0) return [];
@@ -967,9 +1183,7 @@ export default function CoverFlow({
   }, [centerIndex, viewport.w, totalCovers]);
 
   const activeAlbum = albums[centerIndex];
-  const activeTrackTitle = activeAlbum?.spotifyUrl
-    ? trackMap[activeAlbum.spotifyUrl]?.trackTitle ?? ''
-    : '';
+  const activeTrackTitle = currentTrack?.trackTitle ?? '';
   const imageSizes = `${Math.round(layout.coverSize * 1.4)}px`;
 
   return (
@@ -983,9 +1197,15 @@ export default function CoverFlow({
       onPointerMove={handlePointerMove}
       onPointerUp={finishDrag}
       onPointerCancel={finishDrag}
-      className="relative h-[calc(var(--vh,1vh)*100)] w-screen overflow-hidden bg-black flex items-center justify-center select-none touch-none outline-none cursor-grab active:cursor-grabbing rounded-none"
+      className="relative h-[calc(var(--vh,1vh)*100)] w-screen overflow-y-auto overflow-x-clip no-scrollbar bg-black flex flex-col select-none touch-pan-y outline-none cursor-grab active:cursor-grabbing rounded-none"
     >
-      <audio ref={audioRef} loop preload="none" aria-hidden="true" className="hidden" />
+      <audio
+        ref={audioRef}
+        onEnded={handleAudioEnded}
+        preload="none"
+        aria-hidden="true"
+        className="hidden"
+      />
       {/* Offscreen SVG glyph measurer */}
       {SHOW_BACKGROUND_NUMBERS && (
         <svg
@@ -1070,150 +1290,78 @@ export default function CoverFlow({
         </div>
       )}
 
-      {/* Foreground 3D Apple Cover Flow */}
-      <div
-        className="relative z-10 flex items-center justify-center"
-        style={{
-          width: layout.coverSize,
-          height: layout.coverSize,
-          perspective: `${layout.perspective}px`,
-          transformStyle: 'preserve-3d',
-          marginTop: `-${Math.round(layout.coverSize * 0.28)}px`,
-        }}
-      >
-        {visibleCovers.map((cover) => {
-          const initialMetrics = getCoverMetrics(
-            cover.id - centerIndex,
-            0,
-            layout,
-            false
-          );
-          const isPriority = Math.abs(cover.id - centerIndex) <= 2;
-          const isFailed = Boolean(failedImages[cover.id]);
-
-          return (
-            <div
-              key={cover.id}
-              ref={(el) => {
-                if (el) {
-                  itemRefs.current.set(cover.id, el);
-                } else {
-                  itemRefs.current.delete(cover.id);
-                }
-              }}
-              onClick={() => handleCoverClick(cover.id)}
-              style={{
-                width: layout.coverSize,
-                height: layout.coverSize,
-                transform: initialMetrics.transform,
-                zIndex: initialMetrics.zIndex,
-                opacity: initialMetrics.opacity,
-                filter: initialMetrics.filter,
-                transformStyle: 'preserve-3d',
-              }}
-              className="absolute will-change-transform origin-center"
-            >
-              {/* Main album cover */}
-              <div
-                ref={(el) => {
-                  if (el) {
-                    surfaceRefs.current.set(cover.id, el);
-                  } else {
-                    surfaceRefs.current.delete(cover.id);
-                  }
-                }}
-                style={{ boxShadow: initialMetrics.sideShadow }}
-                className="relative w-full h-full bg-neutral-900 rounded-none overflow-hidden"
-              >
-                {!isFailed ? (
-                  <Image
-                    loader={directImageLoader}
-                    src={cover.imageUrl}
-                    alt={`${cover.title} — ${cover.artist}`}
-                    fill
-                    sizes={imageSizes}
-                    priority={isPriority}
-                    referrerPolicy="no-referrer"
-                    draggable={false}
-                    onError={() =>
-                      setFailedImages((prev) => ({ ...prev, [cover.id]: true }))
-                    }
-                    className="object-cover select-none pointer-events-none"
-                  />
-                ) : (
-                  <div className="w-full h-full bg-neutral-900 flex flex-col items-center justify-center p-4 text-center">
-                    <span className="text-xs font-medium text-neutral-300 line-clamp-2">
-                      {cover.title}
-                    </span>
-                    <span className="text-[11px] text-neutral-500 mt-1 line-clamp-1">
-                      {cover.artist}
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              {/* Classic Apple Cover Flow floor reflection */}
-              <div
-                aria-hidden="true"
-                className="pointer-events-none absolute left-0 w-full h-full overflow-hidden"
-                style={{
-                  top: 'calc(100% + 8px)',
-                  maskImage:
-                    'linear-gradient(to bottom, rgba(0, 0, 0, 0.32) 0%, rgba(0, 0, 0, 0.09) 34%, transparent 62%)',
-                  WebkitMaskImage:
-                    'linear-gradient(to bottom, rgba(0, 0, 0, 0.32) 0%, rgba(0, 0, 0, 0.09) 34%, transparent 62%)',
-                }}
-              >
-                <div className="relative w-full h-full bg-neutral-900 rounded-none overflow-hidden -scale-y-100">
-                  {!isFailed && (
-                    <Image
-                      loader={directImageLoader}
-                      src={cover.imageUrl}
-                      alt=""
-                      fill
-                      sizes={imageSizes}
-                      referrerPolicy="no-referrer"
-                      draggable={false}
-                      className="object-cover select-none pointer-events-none"
-                    />
-                  )}
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Minimalist active album metadata, unboxed commentary & Archivo track title */}
-      {activeAlbum && (
+      {/* Normal-flow scrollable column wrapper so narrow landscape viewports scroll smoothly without clipping or visible scrollbars */}
+      <div className="my-auto w-full flex flex-col items-center px-6 pt-8 pb-8">
+        {/* Foreground 3D Apple Cover Flow */}
         <div
-          aria-live="polite"
-          className="pointer-events-none fixed inset-x-0 z-20 flex flex-col items-center text-center px-6"
+          className="relative z-10 flex items-center justify-center shrink-0"
           style={{
-            top: `calc(50% + ${Math.round(layout.coverSize * 0.68)}px)`,
+            width: layout.coverSize,
+            height: layout.coverSize,
+            perspective: `${layout.perspective}px`,
+            marginTop: `${Math.round(layout.coverSize * 0.16)}px`,
+            marginBottom: `${Math.round(layout.coverSize * 0.36)}px`,
           }}
         >
-          <p className="text-base sm:text-lg font-semibold tracking-tight text-white max-w-md truncate">
-            {activeAlbum.title}
-          </p>
-          <p className="text-xs sm:text-sm text-neutral-400 mt-0.5 max-w-sm truncate">
-            {activeAlbum.artist}
-          </p>
-          {activeAlbum.commentary && (
-            <p className="mt-3 text-xs sm:text-[13px] leading-relaxed text-neutral-300 max-w-xl">
-              {activeAlbum.commentary}
+          {visibleCovers.map((cover) => {
+            const initialMetrics = getCoverMetrics(
+              cover.id - centerIndex,
+              0,
+              layout,
+              false
+            );
+            const isPriority = Math.abs(cover.id - centerIndex) <= 2;
+            const isFailed = Boolean(failedImages[cover.id]);
+            const isFlipped = flippedId === cover.id;
+            const isCenteredWithNotes =
+              cover.id === centerIndex && Boolean(cover.commentary);
+
+            return (
+              <FlipAlbumCard
+                key={cover.id}
+                cover={cover}
+                coverSize={layout.coverSize}
+                perspective={layout.perspective}
+                imageSizes={imageSizes}
+                isPriority={isPriority}
+                isFailed={isFailed}
+                isFlipped={isFlipped}
+                isCenteredWithNotes={isCenteredWithNotes}
+                initialTransform={initialMetrics.transform}
+                initialZIndex={initialMetrics.zIndex}
+                initialOpacity={initialMetrics.opacity}
+                initialDimOpacity={initialMetrics.dimOpacity}
+                onImageError={handleImageError}
+                onClick={handleCoverClick}
+                registerItemRef={registerItemRef}
+                registerFrontDimRef={registerFrontDimRef}
+                registerReflectionDimRef={registerReflectionDimRef}
+              />
+            );
+          })}
+        </div>
+
+        {/* Fixed-height minimalist active album metadata (zero layout shift across all albums) */}
+        {activeAlbum && (
+          <div
+            aria-live="polite"
+            className="pointer-events-none relative z-20 flex flex-col items-center text-center w-full"
+          >
+            <p className="text-base sm:text-lg font-semibold tracking-tight text-white max-w-md truncate h-6 sm:h-7 leading-6 sm:leading-7">
+              {activeAlbum.title}
             </p>
-          )}
-          {activeTrackTitle && (
+            <p className="text-xs sm:text-sm text-neutral-400 mt-0.5 max-w-sm truncate h-4 sm:h-5 leading-4 sm:leading-5">
+              {activeAlbum.artist}
+            </p>
             <p
-              className="mt-3 text-sm sm:text-[15px] font-medium tracking-tight text-white max-w-md truncate"
+              className="mt-2.5 h-5 sm:h-6 text-sm sm:text-[15px] font-medium tracking-tight text-white max-w-md truncate leading-5 sm:leading-6"
               style={{ fontFamily: 'var(--font-archivo), sans-serif' }}
             >
-              {activeTrackTitle}
+              {activeTrackTitle || '\u00A0'}
             </p>
-          )}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
     </main>
   );
 }

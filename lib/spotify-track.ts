@@ -1,6 +1,10 @@
-export interface AlbumTrackInfo {
+export interface TrackEntry {
   trackTitle: string;
   previewUrl: string | null;
+}
+
+export interface AlbumTrackInfo {
+  tracks: TrackEntry[];
 }
 
 const trackCache = new Map<string, AlbumTrackInfo | null>();
@@ -46,8 +50,7 @@ export async function getAlbumTrackInfo(
         {
           signal: AbortSignal.timeout(3500),
           headers: {
-            'User-Agent':
-              'Mozilla/5.0 (compatible; synthavard/1.0)',
+            'User-Agent': 'Mozilla/5.0 (compatible; synthavard/1.0)',
           },
         }
       );
@@ -72,20 +75,28 @@ export async function getAlbumTrackInfo(
         return null;
       }
 
-      const chosen =
-        trackList.find((t) => t?.title && t?.audioPreview?.url) ||
-        trackList.find((t) => t?.title && t?.isPlayable !== false) ||
-        trackList[0];
+      const playable = trackList.filter(
+        (t): t is SpotifyEmbedTrack & { title: string } =>
+          Boolean(t?.title) && t?.isPlayable !== false
+      );
+      const sourceList =
+        playable.length > 0
+          ? playable
+          : trackList.filter(
+              (t): t is SpotifyEmbedTrack & { title: string } =>
+                Boolean(t?.title)
+            );
 
-      if (!chosen?.title) {
+      if (sourceList.length === 0) {
         return null;
       }
 
-      const info: AlbumTrackInfo = {
-        trackTitle: chosen.title,
-        previewUrl: chosen.audioPreview?.url ?? null,
-      };
+      const tracks: TrackEntry[] = sourceList.map((t) => ({
+        trackTitle: t.title,
+        previewUrl: t.audioPreview?.url ?? null,
+      }));
 
+      const info: AlbumTrackInfo = { tracks };
       trackCache.set(albumId, info);
       return info;
     } catch {

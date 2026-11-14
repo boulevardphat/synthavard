@@ -17,7 +17,10 @@ export default function SynthavardApp({
   const [isLoaded, setIsLoaded] = useState(false);
 
   const assetUrls = useMemo(
-    () => albums.map((album) => album.imageUrl).filter(Boolean),
+    () => [
+      '/paper.png',
+      ...albums.map((album) => album.imageUrl).filter(Boolean),
+    ],
     [albums]
   );
 

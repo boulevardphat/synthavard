@@ -100,6 +100,48 @@
   + Tạo màn hình `LoadingScreen` (`components/LoadingScreen.tsx`) chuẩn theo đặc tả kỹ thuật: chữ `LOADING` rỗng ruột (SVG outline `fill="none"`, `stroke="rgba(255, 255, 255, 0.95)"`, `strokeWidth="3.2"`, font `Archivo` weight 900, `viewBox="0 0 1000 120"`, `preserveAspectRatio="none"`) trên nền đen tuyệt đối, lộ dần từ trái sang phải qua `clipPath` theo tiến trình tải và giải mã (`img.decode()`) thực tế toàn bộ 165 ảnh bìa album trong synthavard.
   + Tạo `SynthavardApp` (`components/SynthavardApp.tsx`) quản lý biến `--vh` chống nhảy khung hình mobile và chỉ tắt màn hình loading sau khi toàn bộ ảnh đã tải xong (giữ 350ms tại 100%, kèm `safetyTimer` 45s dự phòng).
 
+## Lần 15 (Turn 15)
+- Thời gian: Hiện tại
+- Nội dung thay đổi:
+  + Cho phép cuộn/vuốt xuống mượt mà khi chiều cao khung hình bị hẹp theo bố cục ngang bằng cách chuyển khối Cover Flow + nhận xét + tên bài hát sang dòng chảy tài liệu tự nhiên (`my-auto` bên trong `overflow-y-auto overflow-x-clip`) và ẩn hoàn toàn thanh cuộn (`.no-scrollbar`, `scrollbar-width: none`, `::-webkit-scrollbar { display: none }`).
+  + Phân tách cử chỉ vuốt chạm (`touch-pan-y`, khóa trục ngang/dọc theo hướng vuốt) và cho phép cuộn dọc bằng chuột khi nội dung tràn theo chiều dọc mà không ảnh hưởng tới thao tác lật Cover Flow.
+  + Mở rộng `lib/spotify-track.ts` và `/api/album-track` trả về toàn bộ danh sách bài hát (`tracks[]`) của từng album; gỡ `loop` trên `<audio>` và lắng nghe sự kiện `onEnded` để khi bài hát 1 kết thúc sẽ tự động chuyển sang phát và hiển thị tên bài hát 2 (và các bài tiếp theo) trong album.
+
+## Lần 16 (Turn 16)
+- Thời gian: Hiện tại
+- Nội dung thay đổi:
+  + Đưa phần nội dung giới thiệu (`commentary`) vào mặt sau của từng album cover: chạm/click 1 lần vào album đang đứng ở tâm để lật 3D (`rotateY(180deg)`) xem giới thiệu, chạm lại lần nữa để lật về bìa trước; nếu đang ở mặt sau mà người dùng vuốt/cuộn/nhấn phím điều hướng hoặc chọn album khác thì lập tức tự lật trở lại mặt bìa trước đồng bộ với chuyển động Cover Flow.
+  + Đồng bộ hiệu ứng lật 3D cho cả bóng phản chiếu sàn (`perspective` + `preserve-3d` + `rotateY(180deg)`), bổ sung bóng tiếp xúc sàn động (`radial-gradient` `rotateX(70deg)`) và ánh sáng vật lý trên mặt bìa sau (`cubic-bezier(0.22, 1, 0.36, 1)`).
+  + Giữ chiều cao cố định tuyệt đối (`h-6`/`h-5`) cho vùng hiển thị bên dưới gồm Tên album, Nghệ sĩ và Tên bài hát đang chơi (kể cả khi album không tải được bài hát từ Spotify thì giữ chỗ trống tĩnh), loại bỏ hoàn toàn hiện tượng giật cục bố cục lên xuống khi lướt qua các album.
+
+## Lần 17 (Turn 17)
+- Thời gian: Hiện tại
+- Nội dung thay đổi:
+  + Di chuyển `P22 Typewriter Regular.ttf` và `paper.png` vào thư mục `public/`.
+  + Đăng ký font `P22 Typewriter Regular.ttf` qua `next/font/local` (`--font-p22-typewriter`) trong `app/layout.tsx` và nạp trước `/paper.png` trong `SynthavardApp` / `LoadingScreen`.
+  + Áp dụng nền giấy kẻ ngang `paper.png` và font chữ máy đánh chữ `P22 Typewriter Regular` (mực tối `#1c1b19` tương phản cao trên nền giấy sáng) cho cả mặt sau album cover lẫn mặt sau bóng phản chiếu sàn.
+
+## Lần 18 (Turn 18)
+- Thời gian: Hiện tại
+- Nội dung thay đổi:
+  + Khắc phục triệt để lỗi CSS `filter: brightness(...)` trên các slot `itemRefs` làm phẳng ngữ cảnh `preserve-3d` (thay thế bằng lớp phủ `frontDimRefs` / `reflectionDimRefs` tối ưu GPU, giữ nguyên toàn bộ không gian 3D thật cho phép biến dạng phối cảnh).
+  + Thu gọn tiêu cự phối cảnh từ `4.2 * coverSize` xuống `2.85 * coverSize` để tăng độ sâu 3D rõ nét khi xoay.
+  + Tách component `FlipAlbumCard` dựng từng bìa album và bóng phản chiếu sàn thành mô hình khối hộp 3D thực thụ 6 mặt (mặt trước, mặt sau `paper.png` + `P22 Typewriter`, 4 cạnh gáy/mép trên-dưới-trái-phải có độ dày `slabDepth` sắc nét góc vuông `rounded-none`).
+  + Dùng lò xo vật lý `motion/react` (`useSpring` + `useTransform`) điều khiển đồng thời `rotateY(0→180°)`, `rotateX(0→7.5°→0°)` và nhô trục `Z` ra phía camera giữa nhịp xoay, kèm ánh sáng đổ bóng theo góc quay và bóng tiếp xúc sàn co giãn theo bề dày khối 3D.
+
+## Lần 19 (Turn 19)
+- Thời gian: Hiện tại
+- Nội dung thay đổi:
+  + Khắc phục lỗi mất hiệu ứng lật bằng cách loại bỏ chuỗi `useSpring`/`useTransform` phụ thuộc `motion.div` và chuyển sang điều khiển trực tiếp chuỗi biến đổi `perspective(${perspective}px) translate3d(...) rotateX(...) rotateY(...)` qua `animate()` từ `motion/react` lên `slabRef` và `reflSlabRef`.
+  + Gỡ `transformStyle: 'preserve-3d'` dư thừa trên Stage của `CoverFlow` và slot ngoài của `FlipAlbumCard` để giữ thứ tự `z-index` ổn định và cô lập không gian 3D 6 mặt với `perspective()` gắn trực tiếp trên khối hộp album và khối phản chiếu sàn.
+
+## Lần 20 (Turn 20)
+- Thời gian: Hiện tại
+- Nội dung thay đổi:
+  + Loại bỏ hoàn toàn việc bỏ qua animation do `useReducedMotion()` và chuyển vòng lặp lò xo 3D sang bộ tích phân `requestAnimationFrame` thuần túy (stiffness 165, damping 19.5) điều khiển trực tiếp `slabRef`, `reflSlabRef`, lớp phủ ánh sáng và bóng tiếp xúc sàn.
+  + Không gán `transform` qua JSX prop trên `slabRef` / `reflSlabRef` để React không bao giờ ghi đè chuỗi biến đổi 3D khi re-render.
+  + Tăng cường hiệu ứng mô hình khối 3D rõ nét hơn: tiêu cự lật `2.15 * coverSize`, độ dày cạnh gáy `0.068 * coverSize` (tối thiểu 14px), góc ngửa giữa nhịp xoay `13°`, nhô trục Z `0.30 * coverSize` và bổ sung `WebkitBackfaceVisibility: 'hidden'` cho toàn bộ 6 mặt.
+
 
 
 

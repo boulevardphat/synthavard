@@ -6,19 +6,13 @@ export async function GET(req: NextRequest) {
   const urlOrId = searchParams.get('url') || searchParams.get('albumId') || '';
 
   if (!urlOrId) {
-    return NextResponse.json(
-      { trackTitle: null, previewUrl: null },
-      { status: 400 }
-    );
+    return NextResponse.json({ tracks: [] }, { status: 400 });
   }
 
   const info = await getAlbumTrackInfo(urlOrId);
-  return NextResponse.json(
-    info ?? { trackTitle: null, previewUrl: null },
-    {
-      headers: {
-        'Cache-Control': 'public, max-age=3600',
-      },
-    }
-  );
+  return NextResponse.json(info ?? { tracks: [] }, {
+    headers: {
+      'Cache-Control': 'public, max-age=3600',
+    },
+  });
 }
